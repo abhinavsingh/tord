@@ -17,6 +17,8 @@ classifiers = [
     'Topic :: Internet :: WWW/HTTP :: HTTP Servers',
 ]
 
+install_requires = open('requirements.txt', 'rb').read().strip().split()
+
 setup(
     name                = 'tord',
     version             = tord.__version__,
@@ -27,6 +29,6 @@ setup(
     url                 = tord.__homepage__,
     license             = tord.__license__,
     py_modules          = ['tord'],
-    install_requires    = [],
+    install_requires    = install_requires,
     classifiers         = classifiers
 )

@@ -10,10 +10,23 @@ __license__ = 'BSD'
 
 import os
 import json
+import uuid
+import logging
+
 from tornado import ioloop
 from tornado import web
 from tornado import websocket
-import logging
+
+from async_pubsub import (RedisPubSub, ZMQPubSub, 
+                          CALLBACK_TYPE_CONNECTED, CALLBACK_TYPE_DISCONNECTED, 
+                          CALLBACK_TYPE_SUBSCRIBED, CALLBACK_TYPE_UNSUBSCRIBED,
+                          CALLBACK_TYPE_MESSAGE)
+
+# globals
+HttpRoutes = list()
+WSCmds = dict()
+PubSubKlass = None
+PubSubKWArgs = dict()
 
 def create_http_route_handler(func):
     RequestHandler = type("RequestHandler", (web.RequestHandler,), {
@@ -34,8 +47,14 @@ class WSCmdException(Exception): pass
 
 class WebSocketHandler(websocket.WebSocketHandler):
     
-    def open(self, *args):
-        pass
+    def open(self):
+        global PubSubKlass, PubSubKWArgs
+        self.channel_id = uuid.uuid4().hex
+        
+        PubSubKWArgs['callback'] = self.pubsub_callback
+        self.pubsub = PubSubKlass(**PubSubKWArgs)
+        self.pubsub.connect()
+        self.connected = False
     
     def on_message(self, raw):
         try:
@@ -60,7 +79,23 @@ class WebSocketHandler(websocket.WebSocketHandler):
             self.close()
     
     def on_close(self):
-        pass
+        if self.connected:
+            self.pubsub.disconnect()
+    
+    def pubsub_callback(self, evtype, *args, **kwargs):
+        if evtype == CALLBACK_TYPE_CONNECTED:
+            logging.info('Connected to pubsub')
+            self.connected = True
+            self.pubsub.subscribe(self.channel_id)
+        elif evtype == CALLBACK_TYPE_DISCONNECTED:
+            logging.info('Disconnected from pubsub')
+            self.connected = False
+        elif evtype == CALLBACK_TYPE_SUBSCRIBED:
+            logging.info('Subscribed to channel %s' % args[0])
+        elif evtype == CALLBACK_TYPE_UNSUBSCRIBED:
+            logging.info('Unsubscribed to channel %s' % args[0])
+        elif evtype == CALLBACK_TYPE_MESSAGE:
+            logging.info('Rcvd message %s on channel %s' % (args[1], args[0]))
     
     def raw_to_json(self, raw):
         try:
@@ -69,16 +104,20 @@ class WebSocketHandler(websocket.WebSocketHandler):
             raise WSCmdBadPacket(str(e))
     
     def get_ws_cmd(self, msg):
+        global WSCmds
+        
         if type(msg) is not dict or 'cmd' not in msg:
             raise WSCmdAttributeRequired()
         
         cmd = msg['cmd']
-        if cmd not in self.cmds:
+        if cmd not in WSCmds:
             raise WSCmdNotFound()
         return cmd
     
     def execute_cmd(self, cmd, msg):
-        func = self.cmds[cmd]
+        global WSCmds
+        
+        func = WSCmds[cmd]
         try:
             func(self, msg)
         except Exception, e:
@@ -91,11 +130,10 @@ class Application(object):
     
     def __init__(self, **options):
         self.options = options
-        self.routes = list()
-        self.cmds = dict()
     
     def add_route(self, path, func, options=None):
-        self.routes.append((path, func, options),)
+        global HttpRoutes
+        HttpRoutes.append((path, func, options),)
     
     def route(self, path):
         def decorator(func):
@@ -105,8 +143,9 @@ class Application(object):
         return decorator
     
     def ws(self, cmd):
+        global WSCmds
         def decorator(func):
-            self.cmds[cmd] = func
+            WSCmds[cmd] = func
         return decorator
     
     @property
@@ -133,16 +172,29 @@ class Application(object):
     def abs_www_path(self):
         return os.path.abspath(self.www_path)
     
+    @property
+    def pubsub_klass(self):
+        return ZMQPubSub if self.options['pubsub'] == 'ZMQ' else RedisPubSub
+    
+    @property
+    def pubsub_kwargs(self):
+        return self.options['pubsub_kwargs']
+    
     def run(self):
+        global HttpRoutes, PubSubKlass, PubSubKWArgs
+        
+        # setup pubsub class to use
+        PubSubKlass = self.pubsub_klass
+        PubSubKWArgs = self.pubsub_kwargs
+        
+        # handle websocket requests on ws_path
+        self.add_route(self.ws_path, WebSocketHandler)
+        
         # server static content out of abs_www_path directory
         self.add_route(self.static_path, web.StaticFileHandler, {'path': self.abs_www_path})
         
-        # handle websocket requests on ws_path and pass ws cmd registry
-        WebSocketHandler.cmds = self.cmds
-        self.add_route(self.ws_path, WebSocketHandler)
-        
         # initialize application with registered routes
-        self.app = web.Application(self.routes, debug=self.debug)
+        self.app = web.Application(HttpRoutes, debug=self.debug)
         
         # listen and start io loop
         self.app.listen(self.port)
