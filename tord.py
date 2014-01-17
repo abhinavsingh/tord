@@ -15,7 +15,7 @@ from tornado import web
 from tornado import websocket
 import logging
 
-def get_http_handler(func):
+def create_http_route_handler(func):
     RequestHandler = type("RequestHandler", (web.RequestHandler,), {
         'get': func,
         'post': func,
@@ -27,6 +27,11 @@ def get_http_handler(func):
     })
     return RequestHandler
 
+class WSCmdBadPacket(Exception): pass
+class WSCmdAttributeRequired(Exception): pass
+class WSCmdNotFound(Exception): pass
+class WSCmdException(Exception): pass
+
 class WebSocketHandler(websocket.WebSocketHandler):
     
     def open(self, *args):
@@ -34,51 +39,118 @@ class WebSocketHandler(websocket.WebSocketHandler):
     
     def on_message(self, raw):
         try:
-            msg = json.loads(raw)
-            cmd = msg['cmd']
-            func = self.cmd[cmd]
-            func(self, msg)
-        except Exception, e:
+            msg = self.raw_to_json(raw)
+            cmd = self.get_ws_cmd(msg)
+            self.execute_cmd(cmd, msg)
+        
+        except WSCmdBadPacket, e:
             logging.exception(e)
+            self.close()
+        
+        except WSCmdAttributeRequired, e:
+            logging.exception(e)
+            self.close()
+        
+        except WSCmdNotFound, e:
+            logging.exception(e)
+            self.close()
+        
+        except WSCmdException, e:
+            logging.exception(e)
+            self.close()
     
     def on_close(self):
         pass
     
-    def send(self, msg):
-        self.write_message(msg)
+    def raw_to_json(self, raw):
+        try:
+            return json.loads(raw)
+        except ValueError, e:
+            raise WSCmdBadPacket(str(e))
+    
+    def get_ws_cmd(self, msg):
+        if type(msg) is not dict or 'cmd' not in msg:
+            raise WSCmdAttributeRequired()
+        
+        cmd = msg['cmd']
+        if cmd not in self.cmds:
+            raise WSCmdNotFound()
+        return cmd
+    
+    def execute_cmd(self, cmd, msg):
+        func = self.cmds[cmd]
+        try:
+            func(self, msg)
+        except Exception, e:
+            raise WSCmdException(str(e))
+    
+    def send(self, msg, binary=False):
+        self.write_message(msg, binary)
 
 class Application(object):
     
     def __init__(self, **options):
         self.options = options
         self.routes = list()
-        self.cmd = dict()
+        self.cmds = dict()
     
     def add_route(self, path, func, options=None):
         self.routes.append((path, func, options),)
     
     def route(self, path):
         def decorator(func):
-            handler = get_http_handler(func)
+            handler = create_http_route_handler(func)
             self.add_route(path, handler)
             return func
         return decorator
     
     def ws(self, cmd):
         def decorator(func):
-            self.cmd[cmd] = func
+            self.cmds[cmd] = func
         return decorator
     
     @property
-    def abs_static_path(self):
-        return os.path.abspath(self.options['static_dir'])
+    def port(self):
+        return self.options['port']
+    
+    @property
+    def debug(self):
+        return self.options['debug']
+    
+    @property
+    def ws_path(self):
+        return self.options['ws']
+    
+    @property
+    def static_path(self):
+        return self.options['static']
+    
+    @property
+    def www_path(self):
+        return self.options['www']
+    
+    @property
+    def abs_www_path(self):
+        return os.path.abspath(self.www_path)
     
     def run(self):
-        self.add_route(self.options['static_path'], web.StaticFileHandler, {'path': self.abs_static_path})
+        # server static content out of abs_www_path directory
+        self.add_route(self.static_path, web.StaticFileHandler, {'path': self.abs_www_path})
         
-        WebSocketHandler.cmd = self.cmd
-        self.add_route(self.options['ws_path'], WebSocketHandler)
+        # handle websocket requests on ws_path and pass ws cmd registry
+        WebSocketHandler.cmds = self.cmds
+        self.add_route(self.ws_path, WebSocketHandler)
         
-        self.app = web.Application(self.routes, debug=self.options['debug'])
-        self.app.listen(self.options['port'])
-        ioloop.IOLoop.instance().start()
+        # initialize application with registered routes
+        self.app = web.Application(self.routes, debug=self.debug)
+        
+        # listen and start io loop
+        self.app.listen(self.port)
+        print 'Listening on port %s ...' % self.port
+        
+        try:
+            ioloop.IOLoop.instance().start()
+        except KeyboardInterrupt:
+            pass
+        finally:
+            print 'Shutting down ...'
