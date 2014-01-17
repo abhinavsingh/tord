@@ -1,4 +1,4 @@
-from setuptools import setup
+from setuptools import setup, find_packages
 import tord
 
 classifiers = [
@@ -28,7 +28,7 @@ setup(
     author_email        = tord.__author_email__,
     url                 = tord.__homepage__,
     license             = tord.__license__,
-    py_modules          = ['tord'],
+    packages            = find_packages(),
     install_requires    = install_requires,
     classifiers         = classifiers
 )

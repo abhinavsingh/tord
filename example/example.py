@@ -1,3 +1,4 @@
+import os
 import logging
 from tord import Application
 
@@ -7,7 +8,7 @@ app = Application(
     port = 8888,
     ws = '/ws',
     static = '/(.*)',
-    www = 'www',
+    www = os.path.join(os.path.dirname(os.path.realpath(__file__)), 'www'),
     debug = True,
     pubsub = 'Redis', # or 'ZMQ'
     pubsub_kwargs = {'host':'127.0.0.1', 'port':6379},
