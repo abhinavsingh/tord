@@ -14,6 +14,8 @@ from async_pubsub import (RedisPubSub, ZMQPubSub,
                           CALLBACK_TYPE_SUBSCRIBED, CALLBACK_TYPE_UNSUBSCRIBED,
                           CALLBACK_TYPE_MESSAGE)
 
+from task import Task
+
 # globals
 HttpRoutes = list()
 WSCmds = dict()
@@ -32,10 +34,76 @@ def create_http_route_handler(func):
     })
     return RequestHandler
 
-class WSCmdBadPacket(Exception): pass
-class WSCmdAttributeRequired(Exception): pass
+class WSBadPkt(Exception): pass
+class WSPktCmdAttrMissing(Exception): pass
+class WSPktIDAttrMissing(Exception): pass
 class WSCmdNotFound(Exception): pass
 class WSCmdException(Exception): pass
+
+class WSJSONPkt(object):
+    
+    def __init__(self, ws, raw):
+        self.ws = ws
+        self.channel_id = self.ws.channel_id
+        self.raw = raw
+    
+    def load(self):
+        try:
+            self.msg = json.loads(self.raw)
+        except ValueError, e:
+            raise WSBadPkt(str(e))
+    
+    def validate(self):
+        if 'cmd' not in self:
+            raise WSPktCmdAttrMissing()
+        
+        if 'id' not in self:
+            raise WSPktIDAttrMissing()
+
+    def __getitem__(self, key):
+        return self.msg[key]
+    
+    def __setitem__(self, key, value):
+        self.msg[key] = value
+    
+    def __delitem__(self, key):
+        del self.msg[key]
+    
+    def __contains__(self, key):
+        return key in self.msg
+    
+    def reply(self, response, partial=False):
+        out = {
+            'meta': {
+                'id': self.msg['id'],
+                'partial': partial,
+            }, 
+            'response': response,
+        }
+        
+        if self.ws:
+            self.ws.send(out)
+        else:
+            PubSubKlass.publish(self.channel_id, json.dumps(out))
+    
+    def reply_async(self, handler):
+        self.ws = None
+        t = Task(handler, self)
+        t.start()
+        return t
+    
+    def apply_handler(self):
+        global WSCmds
+        
+        cmd = self['cmd']
+        if cmd not in WSCmds:
+            raise WSCmdNotFound()
+        
+        func = WSCmds[cmd]
+        try:
+            func(self)
+        except Exception, e:
+            raise WSCmdException(str(e))
 
 class WebSocketHandler(websocket.WebSocketHandler):
     
@@ -50,25 +118,25 @@ class WebSocketHandler(websocket.WebSocketHandler):
     
     def on_message(self, raw):
         try:
-            msg = self.raw_to_json(raw)
-            cmd = self.get_ws_cmd(msg)
-            self.execute_cmd(cmd, msg)
+            pkt = WSJSONPkt(self, raw)
+            pkt.load()
+            pkt.validate()
+            pkt.apply_handler()
         
-        except WSCmdBadPacket, e:
+        except WSBadPkt, e:
             logging.exception(e)
-            self.close()
         
-        except WSCmdAttributeRequired, e:
+        except WSPktCmdAttrMissing, e:
             logging.exception(e)
-            self.close()
+        
+        except WSPktIDAttrMissing, e:
+            logging.exception(e)
         
         except WSCmdNotFound, e:
             logging.exception(e)
-            self.close()
         
         except WSCmdException, e:
             logging.exception(e)
-            self.close()
     
     def on_close(self):
         if self.connected:
@@ -87,33 +155,10 @@ class WebSocketHandler(websocket.WebSocketHandler):
         elif evtype == CALLBACK_TYPE_UNSUBSCRIBED:
             logging.info('Unsubscribed to channel %s' % args[0])
         elif evtype == CALLBACK_TYPE_MESSAGE:
-            logging.info('Rcvd message %s on channel %s' % (args[1], args[0]))
-    
-    def raw_to_json(self, raw):
-        try:
-            return json.loads(raw)
-        except ValueError, e:
-            raise WSCmdBadPacket(str(e))
-    
-    def get_ws_cmd(self, msg):
-        global WSCmds
-        
-        if type(msg) is not dict or 'cmd' not in msg:
-            raise WSCmdAttributeRequired()
-        
-        cmd = msg['cmd']
-        if cmd not in WSCmds:
-            raise WSCmdNotFound()
-        return cmd
-    
-    def execute_cmd(self, cmd, msg):
-        global WSCmds
-        
-        func = WSCmds[cmd]
-        try:
-            func(self, msg)
-        except Exception, e:
-            raise WSCmdException(str(e))
+            if args[0] == self.channel_id:
+                self.send(args[1])
+            else:
+                logging.debug('Rcvd msg %s on unhandled channel id %s' % (args[1], args[0]))
     
     def send(self, msg, binary=False):
         self.write_message(msg, binary)

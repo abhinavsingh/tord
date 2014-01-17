@@ -1,3 +1,5 @@
+from .tord import Application
+
 VERSION = (0, 1)
 __version__ = '.'.join(map(str, VERSION[0:2]))
 __description__ = 'Asynchronous websocket + pubsub based micro web framework'

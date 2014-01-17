@@ -22,9 +22,18 @@ def user_profile(request, user_id):
 def user_photo(request, user_id):
     request.write('%s photo' % user_id)
 
-@app.ws(r'/test/cmd/')
-def test_ws_cmd(ws, msg):
-    ws.send({'test':'cmd'})
+@app.ws(r'/test/reply/')
+def test_reply(pkt):
+    pkt.reply({'test':'reply'})
+
+@app.ws(r'/test/reply/async/')
+def test_reply_async(pkt):
+    _task = pkt.reply_async(test_async_reply_handler)
+
+def test_async_reply_handler(t):
+    pkt = t.args[0]
+    pkt.reply({'test':'reply', 'async':True})
+    return True
 
 if __name__ == '__main__':
     app.run()
