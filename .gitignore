@@ -1,0 +1,8 @@
+*.pyc
+.coverage
+.settings
+.project
+.pydevproject
+tord.egg-info
+dist
+cover
