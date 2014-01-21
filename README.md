@@ -1,1 +1,1 @@
-Asynchronous websocket + pubsub based micro web framework
+Asynchronous websocket + pubsub based web framework
