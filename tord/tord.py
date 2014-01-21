@@ -220,20 +220,13 @@ class Application(object):
     def run(self):
         global HttpRoutes, PubSubKlass, PubSubKWArgs
         
-        # setup pubsub class to use
         PubSubKlass = self.pubsub_klass
         PubSubKWArgs = self.pubsub_kwargs
         
-        # handle websocket requests on ws_path
         self.add_route(self.ws_path, WebSocketHandler)
-        
-        # server static content out of abs_www_path directory
         self.add_route(self.static_path, web.StaticFileHandler, {'path': self.abs_www_path})
         
-        # initialize application with registered routes
         self.app = web.Application(HttpRoutes, debug=self.debug)
-        
-        # listen and start io loop
         self.app.listen(self.port)
         print 'Listening on port %s ...' % self.port
         

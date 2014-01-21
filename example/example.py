@@ -28,11 +28,29 @@ def test_reply(pkt):
 
 @app.ws(r'/test/reply/async/')
 def test_reply_async(pkt):
-    _task = pkt.reply_async(test_async_reply_handler)
+    _task = pkt.reply_async(test_reply_async_handler)
 
-def test_async_reply_handler(t):
+@app.ws(r'/test/reply/async/partial/')
+def test_reply_async_partially(pkt):
+    _task = pkt.reply_async(test_reply_async_partial_handler)
+
+def test_reply_async_handler(t):
     pkt = t.args[0]
     pkt.reply({'test':'reply', 'async':True})
+    return True
+
+def test_reply_async_partial_handler(t):
+    import time
+    pkt = t.args[0]
+    
+    i = 0
+    while True:
+        if i == 5:
+            break
+        i += 1
+        pkt.reply({'test':'reply', 'async':True, 'i':i}, partial=bool(i == 5))
+        time.sleep(1)
+    
     return True
 
 if __name__ == '__main__':
