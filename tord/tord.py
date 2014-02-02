@@ -3,37 +3,24 @@
 import os
 import json
 import uuid
+import task
 import logging
+import async_pubsub
 
 from tornado import ioloop
 from tornado import web
 from tornado import websocket
 from tornado import template
 
-import async_pubsub
-from async_pubsub import (CALLBACK_TYPE_CONNECTED, CALLBACK_TYPE_DISCONNECTED, 
-                          CALLBACK_TYPE_SUBSCRIBED, CALLBACK_TYPE_UNSUBSCRIBED,
-                          CALLBACK_TYPE_MESSAGE)
-
-from task import Task
-
 # globals
-HttpRoutes = list()
-WSRoutes = dict()
-PubSubKlass = None
-PubSubOpts = dict()
-
-def create_http_route_handler(func):
-    RequestHandler = type("RequestHandler", (web.RequestHandler,), {
-        'get': func,
-        'post': func,
-        'head': func,
-        'options': func,
-        'put': func,
-        'patch': func,
-        'delete': func,
-    })
-    return RequestHandler
+logger = logging.getLogger(__name__)
+settings = dict()
+settings['routes'] = dict()
+settings['routes']['http'] = list()
+settings['routes']['ws'] = dict()
+settings['pubsub'] = dict()
+settings['pubsub']['klass'] = None
+settings['pubsub']['opts'] = dict()
 
 class WSBadPkt(Exception): pass
 class WSPktPathAttrMissing(Exception): pass
@@ -74,6 +61,8 @@ class WSJSONPkt(object):
         return key in self.msg
     
     def reply(self, response, final=True):
+        global settings
+        
         out = {
             'meta': {
                 'id': self.msg['id'],
@@ -85,22 +74,22 @@ class WSJSONPkt(object):
         if self.ws:
             self.ws.send(out)
         else:
-            PubSubKlass.publish(self.channel_id, json.dumps(out))
+            settings['pubsub']['klass'].publish(self.channel_id, json.dumps(out))
     
     def reply_async(self, handler):
         self.ws = None
-        t = Task(handler, self)
+        t = task.Task(handler, self)
         t.start()
         return t
     
     def apply_handler(self):
-        global WSRoutes
+        global settings
         
         path = self['path']
-        if path not in WSRoutes:
+        if path not in settings['routes']['ws']:
             raise WSRouteNotFound()
         
-        func = WSRoutes[path]
+        func = settings['routes']['ws'][path]
         try:
             func(self)
         except Exception, e:
@@ -109,54 +98,54 @@ class WSJSONPkt(object):
 class WebSocketHandler(websocket.WebSocketHandler):
     
     def open(self):
-        global PubSubKlass, PubSubOpts
+        global settings
         self.channel_id = uuid.uuid4().hex
         
-        PubSubOpts['callback'] = self.pubsub_callback
-        self.pubsub = PubSubKlass(**PubSubOpts)
+        settings['pubsub']['opts']['callback'] = self.pubsub_callback
+        self.pubsub = settings['pubsub']['klass'](**settings['pubsub']['opts'])
         self.pubsub.connect()
         self.connected = False
     
     def on_message(self, raw):
         try:
-            logging.debug('websocket rcvd: %s' % raw)
+            logger.debug('websocket rcvd: %s' % raw)
             pkt = WSJSONPkt(self, raw)
             pkt.load()
             pkt.validate()
             pkt.apply_handler()
         
         except WSBadPkt, e:
-            logging.exception(e)
+            logger.exception(e)
         
         except WSPktPathAttrMissing, e:
-            logging.exception(e)
+            logger.exception(e)
         
         except WSPktIDAttrMissing, e:
-            logging.exception(e)
+            logger.exception(e)
         
         except WSRouteNotFound, e:
-            logging.exception(e)
+            logger.exception(e)
         
         except WSRouteException, e:
-            logging.exception(e)
+            logger.exception(e)
     
     def on_close(self):
         if self.connected:
             self.pubsub.disconnect()
     
     def pubsub_callback(self, evtype, *args, **kwargs):
-        if evtype == CALLBACK_TYPE_CONNECTED:
-            logging.info('Connected to pubsub')
+        if evtype == async_pubsub.CALLBACK_TYPE_CONNECTED:
+            logger.info('Connected to pubsub')
             self.connected = True
             self.pubsub.subscribe(self.channel_id)
-        elif evtype == CALLBACK_TYPE_DISCONNECTED:
-            logging.info('Disconnected from pubsub')
+        elif evtype == async_pubsub.CALLBACK_TYPE_DISCONNECTED:
+            logger.info('Disconnected from pubsub')
             self.connected = False
-        elif evtype == CALLBACK_TYPE_SUBSCRIBED:
-            logging.info('Subscribed to channel %s' % args[0])
-        elif evtype == CALLBACK_TYPE_UNSUBSCRIBED:
-            logging.info('Unsubscribed to channel %s' % args[0])
-        elif evtype == CALLBACK_TYPE_MESSAGE:
+        elif evtype == async_pubsub.CALLBACK_TYPE_SUBSCRIBED:
+            logger.info('Subscribed to channel %s' % args[0])
+        elif evtype == async_pubsub.CALLBACK_TYPE_UNSUBSCRIBED:
+            logger.info('Unsubscribed to channel %s' % args[0])
+        elif evtype == async_pubsub.CALLBACK_TYPE_MESSAGE:
             if args[0] == self.channel_id:
                 logging.debug('pubsub channel: %s rcvd: %s' % (args[0], args[1]))
                 self.send(args[1])
@@ -170,26 +159,40 @@ class WebSocketHandler(websocket.WebSocketHandler):
 class Application(object):
     
     def __init__(self, **options):
-        self.options = options
+        global settings
+        settings['options'] = options
     
     def add_route(self, path, func, options=None, prepend=False):
-        global HttpRoutes
+        global settings
         if prepend:
-            HttpRoutes = [(path, func, options),] + HttpRoutes
+            settings['routes']['http'] = [(path, func, options),] + settings['routes']['http']
         else:
-            HttpRoutes.append((path, func, options),)
+            settings['routes']['http'].append((path, func, options),)
+    
+    @staticmethod
+    def create_http_route_handler(func):
+        RequestHandler = type("RequestHandler", (web.RequestHandler,), {
+            'get': func,
+            'post': func,
+            'head': func,
+            'options': func,
+            'put': func,
+            'patch': func,
+            'delete': func,
+        })
+        return RequestHandler
     
     def _http_route(self, path):
         def decorator(func):
-            handler = create_http_route_handler(func)
+            handler = self.create_http_route_handler(func)
             self.add_route(path, handler)
             return func
         return decorator
     
     def _ws_route(self, path):
-        global WSRoutes
+        global settings
         def decorator(func):
-            WSRoutes[path] = func
+            settings['routes']['ws'][path] = func
         return decorator
     
     def route(self, path, transport='http'):
@@ -201,39 +204,44 @@ class Application(object):
     
     @property
     def port(self):
-        return self.options['port'] if 'port' in self.options else 8888
+        global settings
+        return settings['options']['port'] if 'port' in settings['options'] else 8888
     
     @property
     def ws_path(self):
-        return self.options['ws_path'] if 'ws_path' in self.options else '/ws'
+        global settings
+        return settings['options']['ws_path'] if 'ws_path' in settings['options'] else '/ws'
     
     @property
     def static_dir(self):
-        return self.options['static_dir']
+        global settings
+        return settings['options']['static_dir']
     
     @property
     def static_path(self):
-        return self.options['static_path'] if 'static_path' in self.options else '/static'
+        global settings
+        return settings['options']['static_path'] if 'static_path' in settings['options'] else '/static'
     
     @property
     def templates_dir(self):
-        return self.options['templates_dir']
+        global settings
+        return settings['options']['templates_dir']
     
     @property
     def debug(self):
-        return self.options['debug'] if 'debug' in self.options else False
+        global settings
+        return settings['options']['debug'] if 'debug' in settings['options'] else False
     
     def run(self):
-        global HttpRoutes, PubSubKlass, PubSubOpts
-        
-        PubSubKlass = getattr(async_pubsub, self.pubsub_klass)
-        PubSubOpts = self.pubsub_opts
+        global settings
+        settings['pubsub']['klass'] = getattr(async_pubsub, self.pubsub_klass)
+        settings['pubsub']['opts'] = self.pubsub_opts
         
         self.add_route('%s/(.*)' % self.static_path, web.StaticFileHandler, {'path': os.path.abspath(self.static_dir)}, True)
         self.add_route(self.ws_path, WebSocketHandler, None, True)
         self.template = template.Loader(os.path.abspath(self.templates_dir))
         
-        self.app = web.Application(HttpRoutes, debug=self.debug, cache_compiled_templates=False)
+        self.app = web.Application(settings['routes']['http'], debug=self.debug, cache_compiled_templates=False)
         self.app.listen(self.port)
         print 'Listening on port %s ...' % self.port
         
