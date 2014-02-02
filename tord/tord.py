@@ -12,16 +12,19 @@ from tornado import web
 from tornado import websocket
 from tornado import template
 
-# globals
 logger = logging.getLogger(__name__)
-settings = dict()
-settings['routes'] = dict()
-settings['routes']['http'] = list()
-settings['routes']['ws'] = dict()
-settings['pubsub'] = dict()
-settings['pubsub']['klass'] = None
-settings['pubsub']['opts'] = dict()
 
+# settings
+class Settings(): pass
+settings = Settings()
+settings.routes = dict()
+settings.routes['http'] = list()
+settings.routes['ws'] = dict()
+settings.pubsub = dict()
+settings.pubsub['klass'] = None
+settings.pubsub['opts'] = dict()
+
+# custom exceptions
 class WSBadPkt(Exception): pass
 class WSPktPathAttrMissing(Exception): pass
 class WSPktIDAttrMissing(Exception): pass
@@ -29,6 +32,7 @@ class WSRouteNotFound(Exception): pass
 class WSRouteException(Exception): pass
 
 class WSJSONPkt(object):
+    'json reserializer for websocket channels (implement your own)'
     
     def __init__(self, ws, raw):
         self.ws = ws
@@ -74,7 +78,7 @@ class WSJSONPkt(object):
         if self.ws:
             self.ws.send(out)
         else:
-            settings['pubsub']['klass'].publish(self.channel_id, json.dumps(out))
+            settings.pubsub['klass'].publish(self.channel_id, json.dumps(out))
     
     def reply_async(self, handler):
         self.ws = None
@@ -86,23 +90,24 @@ class WSJSONPkt(object):
         global settings
         
         path = self['path']
-        if path not in settings['routes']['ws']:
+        if path not in settings.routes['ws']:
             raise WSRouteNotFound()
         
-        func = settings['routes']['ws'][path]
+        func = settings.routes['ws'][path]
         try:
             func(self)
         except Exception, e:
             raise WSRouteException(str(e))
 
 class WebSocketHandler(websocket.WebSocketHandler):
+    'Implements tornado web socket handler and delegate packets to handlers'
     
     def open(self):
         global settings
         self.channel_id = uuid.uuid4().hex
         
-        settings['pubsub']['opts']['callback'] = self.pubsub_callback
-        self.pubsub = settings['pubsub']['klass'](**settings['pubsub']['opts'])
+        settings.pubsub['opts']['callback'] = self.pubsub_callback
+        self.pubsub = settings.pubsub['klass'](**settings.pubsub['opts'])
         self.pubsub.connect()
         self.connected = False
     
@@ -157,17 +162,18 @@ class WebSocketHandler(websocket.WebSocketHandler):
         self.write_message(msg, binary)
 
 class Application(object):
+    'Handles initial bootstrapping of the application.'
     
     def __init__(self, **options):
         global settings
-        settings['options'] = options
+        settings.options = options
     
     def add_route(self, path, func, options=None, prepend=False):
         global settings
         if prepend:
-            settings['routes']['http'] = [(path, func, options),] + settings['routes']['http']
+            settings.routes['http'] = [(path, func, options),] + settings.routes['http']
         else:
-            settings['routes']['http'].append((path, func, options),)
+            settings.routes['http'].append((path, func, options),)
     
     @staticmethod
     def create_http_route_handler(func):
@@ -192,7 +198,7 @@ class Application(object):
     def _ws_route(self, path):
         global settings
         def decorator(func):
-            settings['routes']['ws'][path] = func
+            settings.routes['ws'][path] = func
         return decorator
     
     def route(self, path, transport='http'):
@@ -205,43 +211,43 @@ class Application(object):
     @property
     def port(self):
         global settings
-        return settings['options']['port'] if 'port' in settings['options'] else 8888
+        return settings.options['port'] if 'port' in settings.options else 8888
     
     @property
     def ws_path(self):
         global settings
-        return settings['options']['ws_path'] if 'ws_path' in settings['options'] else '/ws'
+        return settings.options['ws_path'] if 'ws_path' in settings.options else '/ws'
     
     @property
     def static_dir(self):
         global settings
-        return settings['options']['static_dir']
+        return settings.options['static_dir']
     
     @property
     def static_path(self):
         global settings
-        return settings['options']['static_path'] if 'static_path' in settings['options'] else '/static'
+        return settings.options['static_path'] if 'static_path' in settings.options else '/static'
     
     @property
     def templates_dir(self):
         global settings
-        return settings['options']['templates_dir']
+        return settings.options['templates_dir']
     
     @property
     def debug(self):
         global settings
-        return settings['options']['debug'] if 'debug' in settings['options'] else False
+        return settings.options['debug'] if 'debug' in settings.options else False
     
     def run(self):
         global settings
-        settings['pubsub']['klass'] = getattr(async_pubsub, self.pubsub_klass)
-        settings['pubsub']['opts'] = self.pubsub_opts
+        settings.pubsub['klass'] = getattr(async_pubsub, self.pubsub_klass)
+        settings.pubsub['opts'] = self.pubsub_opts
         
         self.add_route('%s/(.*)' % self.static_path, web.StaticFileHandler, {'path': os.path.abspath(self.static_dir)}, True)
         self.add_route(self.ws_path, WebSocketHandler, None, True)
         self.template = template.Loader(os.path.abspath(self.templates_dir))
         
-        self.app = web.Application(settings['routes']['http'], debug=self.debug, cache_compiled_templates=False)
+        self.app = web.Application(settings.routes['http'], debug=self.debug, cache_compiled_templates=False)
         self.app.listen(self.port)
         print 'Listening on port %s ...' % self.port
         
