@@ -119,7 +119,7 @@ class WebSocketHandler(websocket.WebSocketHandler):
     
     def on_message(self, raw):
         try:
-            print 'websocket rcvd: %s' % raw
+            logging.debug('websocket rcvd: %s' % raw)
             pkt = WSJSONPkt(self, raw)
             pkt.load()
             pkt.validate()
@@ -158,13 +158,13 @@ class WebSocketHandler(websocket.WebSocketHandler):
             logging.info('Unsubscribed to channel %s' % args[0])
         elif evtype == CALLBACK_TYPE_MESSAGE:
             if args[0] == self.channel_id:
-                print 'pubsub channel: %s rcvd: %s' % (args[0], args[1])
+                logging.debug('pubsub channel: %s rcvd: %s' % (args[0], args[1]))
                 self.send(args[1])
             else:
                 logging.debug('Rcvd msg %s on unhandled channel id %s' % (args[1], args[0]))
     
     def send(self, msg, binary=False):
-        print 'websocket send: %s' % msg
+        logging.debug('websocket send: %s' % msg)
         self.write_message(msg, binary)
 
 class Application(object):
