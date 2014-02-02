@@ -8,9 +8,10 @@ import logging
 from tornado import ioloop
 from tornado import web
 from tornado import websocket
+from tornado import template
 
-from async_pubsub import (RedisPubSub, ZMQPubSub, 
-                          CALLBACK_TYPE_CONNECTED, CALLBACK_TYPE_DISCONNECTED, 
+import async_pubsub
+from async_pubsub import (CALLBACK_TYPE_CONNECTED, CALLBACK_TYPE_DISCONNECTED, 
                           CALLBACK_TYPE_SUBSCRIBED, CALLBACK_TYPE_UNSUBSCRIBED,
                           CALLBACK_TYPE_MESSAGE)
 
@@ -18,9 +19,9 @@ from task import Task
 
 # globals
 HttpRoutes = list()
-WSCmds = dict()
+WSRoutes = dict()
 PubSubKlass = None
-PubSubKWArgs = dict()
+PubSubOpts = dict()
 
 def create_http_route_handler(func):
     RequestHandler = type("RequestHandler", (web.RequestHandler,), {
@@ -35,17 +36,17 @@ def create_http_route_handler(func):
     return RequestHandler
 
 class WSBadPkt(Exception): pass
-class WSPktCmdAttrMissing(Exception): pass
+class WSPktPathAttrMissing(Exception): pass
 class WSPktIDAttrMissing(Exception): pass
-class WSCmdNotFound(Exception): pass
-class WSCmdException(Exception): pass
+class WSRouteNotFound(Exception): pass
+class WSRouteException(Exception): pass
 
 class WSJSONPkt(object):
     
     def __init__(self, ws, raw):
         self.ws = ws
-        self.channel_id = self.ws.channel_id
         self.raw = raw
+        self.channel_id = self.ws.channel_id
     
     def load(self):
         try:
@@ -54,8 +55,8 @@ class WSJSONPkt(object):
             raise WSBadPkt(str(e))
     
     def validate(self):
-        if 'cmd' not in self:
-            raise WSPktCmdAttrMissing()
+        if 'path' not in self:
+            raise WSPktPathAttrMissing()
         
         if 'id' not in self:
             raise WSPktIDAttrMissing()
@@ -72,11 +73,11 @@ class WSJSONPkt(object):
     def __contains__(self, key):
         return key in self.msg
     
-    def reply(self, response, partial=False):
+    def reply(self, response, final=True):
         out = {
             'meta': {
                 'id': self.msg['id'],
-                'partial': partial,
+                'final': final,
             }, 
             'response': response,
         }
@@ -93,31 +94,32 @@ class WSJSONPkt(object):
         return t
     
     def apply_handler(self):
-        global WSCmds
+        global WSRoutes
         
-        cmd = self['cmd']
-        if cmd not in WSCmds:
-            raise WSCmdNotFound()
+        path = self['path']
+        if path not in WSRoutes:
+            raise WSRouteNotFound()
         
-        func = WSCmds[cmd]
+        func = WSRoutes[path]
         try:
             func(self)
         except Exception, e:
-            raise WSCmdException(str(e))
+            raise WSRouteException(str(e))
 
 class WebSocketHandler(websocket.WebSocketHandler):
     
     def open(self):
-        global PubSubKlass, PubSubKWArgs
+        global PubSubKlass, PubSubOpts
         self.channel_id = uuid.uuid4().hex
         
-        PubSubKWArgs['callback'] = self.pubsub_callback
-        self.pubsub = PubSubKlass(**PubSubKWArgs)
+        PubSubOpts['callback'] = self.pubsub_callback
+        self.pubsub = PubSubKlass(**PubSubOpts)
         self.pubsub.connect()
         self.connected = False
     
     def on_message(self, raw):
         try:
+            print 'websocket rcvd: %s' % raw
             pkt = WSJSONPkt(self, raw)
             pkt.load()
             pkt.validate()
@@ -126,16 +128,16 @@ class WebSocketHandler(websocket.WebSocketHandler):
         except WSBadPkt, e:
             logging.exception(e)
         
-        except WSPktCmdAttrMissing, e:
+        except WSPktPathAttrMissing, e:
             logging.exception(e)
         
         except WSPktIDAttrMissing, e:
             logging.exception(e)
         
-        except WSCmdNotFound, e:
+        except WSRouteNotFound, e:
             logging.exception(e)
         
-        except WSCmdException, e:
+        except WSRouteException, e:
             logging.exception(e)
     
     def on_close(self):
@@ -156,11 +158,13 @@ class WebSocketHandler(websocket.WebSocketHandler):
             logging.info('Unsubscribed to channel %s' % args[0])
         elif evtype == CALLBACK_TYPE_MESSAGE:
             if args[0] == self.channel_id:
+                print 'pubsub channel: %s rcvd: %s' % (args[0], args[1])
                 self.send(args[1])
             else:
                 logging.debug('Rcvd msg %s on unhandled channel id %s' % (args[1], args[0]))
     
     def send(self, msg, binary=False):
+        print 'websocket send: %s' % msg
         self.write_message(msg, binary)
 
 class Application(object):
@@ -168,65 +172,69 @@ class Application(object):
     def __init__(self, **options):
         self.options = options
     
-    def add_route(self, path, func, options=None):
+    def add_route(self, path, func, options=None, prepend=False):
         global HttpRoutes
-        HttpRoutes.append((path, func, options),)
+        if prepend:
+            HttpRoutes = [(path, func, options),] + HttpRoutes
+        else:
+            HttpRoutes.append((path, func, options),)
     
-    def route(self, path):
+    def _http_route(self, path):
         def decorator(func):
             handler = create_http_route_handler(func)
             self.add_route(path, handler)
             return func
         return decorator
     
-    def ws(self, cmd):
-        global WSCmds
+    def _ws_route(self, path):
+        global WSRoutes
         def decorator(func):
-            WSCmds[cmd] = func
+            WSRoutes[path] = func
         return decorator
+    
+    def route(self, path, transport='http'):
+        return self._ws_route(path) if transport == 'ws' else self._http_route(path)
+    
+    def pubsub(self, klass, opts):
+        self.pubsub_klass = klass
+        self.pubsub_opts = opts
     
     @property
     def port(self):
-        return self.options['port']
-    
-    @property
-    def debug(self):
-        return self.options['debug']
+        return self.options['port'] if 'port' in self.options else 8888
     
     @property
     def ws_path(self):
-        return self.options['ws']
+        return self.options['ws_path'] if 'ws_path' in self.options else '/ws'
+    
+    @property
+    def static_dir(self):
+        return self.options['static_dir']
     
     @property
     def static_path(self):
-        return self.options['static']
+        return self.options['static_path'] if 'static_path' in self.options else '/static'
     
     @property
-    def www_path(self):
-        return self.options['www']
+    def templates_dir(self):
+        return self.options['templates_dir']
     
     @property
-    def abs_www_path(self):
-        return os.path.abspath(self.www_path)
-    
-    @property
-    def pubsub_klass(self):
-        return ZMQPubSub if self.options['pubsub'] == 'ZMQ' else RedisPubSub
-    
-    @property
-    def pubsub_kwargs(self):
-        return self.options['pubsub_kwargs']
+    def debug(self):
+        return self.options['debug'] if 'debug' in self.options else False
     
     def run(self):
-        global HttpRoutes, PubSubKlass, PubSubKWArgs
+        global HttpRoutes, PubSubKlass, PubSubOpts
         
-        PubSubKlass = self.pubsub_klass
-        PubSubKWArgs = self.pubsub_kwargs
+        PubSubKlass = getattr(async_pubsub, self.pubsub_klass)
+        PubSubOpts = self.pubsub_opts
         
-        self.add_route(self.ws_path, WebSocketHandler)
-        self.add_route(self.static_path, web.StaticFileHandler, {'path': self.abs_www_path})
+        self.add_route('%s/(.*)' % self.static_path, web.StaticFileHandler, {'path': os.path.abspath(self.static_dir)}, True)
+        self.add_route(self.ws_path, WebSocketHandler, None, True)
+        self.template = template.Loader(os.path.abspath(self.templates_dir))
         
-        self.app = web.Application(HttpRoutes, debug=self.debug)
+        print HttpRoutes
+        self.app = web.Application(HttpRoutes, debug=self.debug, cache_compiled_templates=False)
         self.app.listen(self.port)
         print 'Listening on port %s ...' % self.port
         
