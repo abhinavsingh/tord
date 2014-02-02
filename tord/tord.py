@@ -233,7 +233,6 @@ class Application(object):
         self.add_route(self.ws_path, WebSocketHandler, None, True)
         self.template = template.Loader(os.path.abspath(self.templates_dir))
         
-        print HttpRoutes
         self.app = web.Application(HttpRoutes, debug=self.debug, cache_compiled_templates=False)
         self.app.listen(self.port)
         print 'Listening on port %s ...' % self.port
