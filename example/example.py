@@ -30,7 +30,7 @@ app = Application(
 ##
 
 app.pubsub(
-    klass = 'RedisPubSub', # or 'ZMQPubSub'.
+    klass = 'Redis', # or 'ZMQ'.
     opts = { # RedisPubSub expects redis server running at below configuration
         'host': '127.0.0.1',
         'port': 6379,

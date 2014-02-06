@@ -13,8 +13,10 @@ classifiers = [
     'Operating System :: Microsoft',
     'Operating System :: OS Independent',
     'Programming Language :: Python :: 2.7',
+    'Topic :: Communications :: Chat',
     'Topic :: Internet :: Proxy Servers',
     'Topic :: Internet :: WWW/HTTP :: HTTP Servers',
+    'Topic :: Internet :: WWW/HTTP :: WSGI',
 ]
 
 install_requires = open('requirements.txt', 'rb').read().strip().split()

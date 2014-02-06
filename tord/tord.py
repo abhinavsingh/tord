@@ -29,8 +29,37 @@ class WSPktIDAttrMissing(Exception): pass
 class WSRouteNotFound(Exception): pass
 class WSRouteException(Exception): pass
 
+def import_path(path):
+    """Import and return object representing dotted path.
+
+    Args:
+        path (str): Dotted path to import.
+
+    Example, for path `package.module.method`, it returns 
+    an object representing `method`. This is similar to:
+
+    >>> from package.module import method
+
+    Wildcards (*) are also supported. e.g. providing 
+    `package.module.*` is similar to doing:
+
+    >>> from package import module
+
+    """
+    parts = path.split('.')
+    prefix = '.'.join(parts[:-1])
+    suffix = '.'.join(parts[-1:])
+    method = suffix if suffix is not '*' else [suffix]
+
+    try:
+        module = __import__(prefix, globals(), locals(), method, -1)
+        return getattr(module, method) if suffix is not '*' else module
+    except AttributeError as e:
+        logger.error('failed to import path %s with reason Attribute error, prefix %s, suffix %s' % (path, prefix, suffix))
+        raise ImportError(e)
+
 class WSJSONPkt(object):
-    'json reserializer for websocket channels (implement your own)'
+    'json serializer for websocket channels (implement your own)'
     
     def __init__(self, ws, raw):
         self.ws = ws
@@ -93,6 +122,10 @@ class WSJSONPkt(object):
         except Exception, e:
             raise WSRouteException(str(e))
 
+class HTTPRequestHandler(web.RequestHandler):
+    
+    pass
+
 class WebSocketHandler(SockJSConnection):
     'Implements tornado web socket handler and delegate packets to handlers'
     
@@ -133,18 +166,18 @@ class WebSocketHandler(SockJSConnection):
             self.pubsub.disconnect()
     
     def pubsub_callback(self, evtype, *args, **kwargs):
-        if evtype == async_pubsub.CALLBACK_TYPE_CONNECTED:
+        if evtype == async_pubsub.constants.CALLBACK_TYPE_CONNECTED:
             logger.info('Connected to pubsub')
             self.connected = True
             self.pubsub.subscribe(self.channel_id)
-        elif evtype == async_pubsub.CALLBACK_TYPE_DISCONNECTED:
+        elif evtype == async_pubsub.constants.CALLBACK_TYPE_DISCONNECTED:
             logger.info('Disconnected from pubsub')
             self.connected = False
-        elif evtype == async_pubsub.CALLBACK_TYPE_SUBSCRIBED:
+        elif evtype == async_pubsub.constants.CALLBACK_TYPE_SUBSCRIBED:
             logger.info('Subscribed to channel %s' % args[0])
-        elif evtype == async_pubsub.CALLBACK_TYPE_UNSUBSCRIBED:
+        elif evtype == async_pubsub.constants.CALLBACK_TYPE_UNSUBSCRIBED:
             logger.info('Unsubscribed to channel %s' % args[0])
-        elif evtype == async_pubsub.CALLBACK_TYPE_MESSAGE:
+        elif evtype == async_pubsub.constants.CALLBACK_TYPE_MESSAGE:
             if args[0] == self.channel_id:
                 logging.debug('pubsub channel: %s rcvd: %s' % (args[0], args[1]))
                 self.send(args[1])
@@ -153,6 +186,8 @@ class WebSocketHandler(SockJSConnection):
     
     def send(self, msg):
         logging.debug('websocket send: %s' % msg)
+        if type(msg) not in (str, unicode):
+            msg = json.dumps(msg)
         super(WebSocketHandler, self).send(msg)
 
 class Application(object):
@@ -164,16 +199,20 @@ class Application(object):
         self.tord_static_path = os.path.join(os.path.join(os.path.dirname(os.path.realpath(__file__)), 'static'), 'tord')
         self.template = template.Loader(os.path.abspath(self.templates_dir))
     
-    def add_route(self, path, func, options=None, prepend=False):
+    def add_http_route(self, path, func, options=None, prepend=False):
         global settings
         if prepend:
             settings.routes['http'] = [(path, func, options),] + settings.routes['http']
         else:
             settings.routes['http'].append((path, func, options),)
     
+    def add_ws_route(self, path, func):
+        global settings
+        settings.routes['ws'][path] = func
+    
     @staticmethod
-    def create_http_route_handler(func):
-        RequestHandler = type("RequestHandler", (web.RequestHandler,), {
+    def new_http_request_handler(func):
+        Handler = type("WebRequestHandler", (HTTPRequestHandler,), {
             'get': func,
             'post': func,
             'head': func,
@@ -182,25 +221,36 @@ class Application(object):
             'patch': func,
             'delete': func,
         })
-        return RequestHandler
+        return Handler
     
-    def _http_route(self, path):
+    def _add_http_route(self, path):
         def decorator(func):
-            handler = self.create_http_route_handler(func)
-            self.add_route(path, handler)
+            handler = self.new_http_request_handler(func)
+            self.add_http_route(path, handler)
             return func
         return decorator
     
-    def _ws_route(self, path):
+    def _add_ws_route(self, path):
         global settings
         def decorator(func):
-            settings.routes['ws'][path] = func
+            self.add_ws_route(path, func)
         return decorator
     
     def route(self, path, transport='http'):
-        return self._ws_route(path) if transport == 'ws' else self._http_route(path)
+        '''Add route for particular path.
+        
+        Both `http` and `ws` routes can be registered using this method.
+        '''
+        return self._add_ws_route(path) if transport == 'ws' else self._add_http_route(path)
     
     def pubsub(self, klass, opts):
+        '''Configure pubsub module for this application.
+        
+        `klass` must be one of `async_pubsub` implementation
+        or must implement it's base API.
+        
+        `opts` is a dictionary passed as kwargs to the pubsub constructor
+        '''
         self.pubsub_klass = klass
         self.pubsub_opts = opts
     
@@ -236,11 +286,11 @@ class Application(object):
     
     def run(self):
         global settings
-        settings.pubsub['klass'] = getattr(async_pubsub, self.pubsub_klass)
+        settings.pubsub['klass'] = import_path('async_pubsub.%s_pubsub.%sPubSub' % (self.pubsub_klass.lower(), self.pubsub_klass))
         settings.pubsub['opts'] = self.pubsub_opts
         
-        self.add_route('%s/(.*)' % self.static_path, web.StaticFileHandler, {'path': os.path.abspath(self.static_dir)}, True)
-        self.add_route('%s/tord/(.*)' % self.static_path, web.StaticFileHandler, {'path': self.tord_static_path}, True)
+        self.add_http_route('%s/(.*)' % self.static_path, web.StaticFileHandler, {'path': os.path.abspath(self.static_dir)}, True)
+        self.add_http_route('%s/tord/(.*)' % self.static_path, web.StaticFileHandler, {'path': self.tord_static_path}, True)
         
         self.app = web.Application(
             SockJSRouter(WebSocketHandler, self.ws_path).urls + settings.routes['http'], 

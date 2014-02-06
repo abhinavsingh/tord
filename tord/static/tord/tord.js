@@ -218,15 +218,14 @@ Tord.Channel.prototype = {
 	_on_msg: function(e) {
 		try {
 			// only json objects are valid response
-			//var msg = JSON.parse(e.data);
-			var msg = e.data;
+			var msg = JSON.parse(e.data);
 			
 			// flag that is true if response
 			// has been delegated to corresponding
 			// callback or handler
 			var handled = false;
 			
-			// if there is a registered callback for this response
+			// if there is a registered callback for this response by id
 			if(msg['_id_'] in this.cbs) {
 				// and it's a valid callback
 				if(this.cbs[msg['_id_']]) {
@@ -234,8 +233,11 @@ Tord.Channel.prototype = {
 					this.cbs[msg['_id_']](msg);
 					handled = true;
 				}
+				
 				// cleanup callback references
-				delete this.cbs[msg['_id_']];
+				if(!('_final_' in msg && msg['_final_'] == false)) {
+					delete this.cbs[msg['_id_']];
+				}
 			}
 			
 			// if response hasn't been delegated to any callback
