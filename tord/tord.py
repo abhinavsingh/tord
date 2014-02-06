@@ -30,7 +30,7 @@ class WSRouteNotFound(Exception): pass
 class WSRouteException(Exception): pass
 
 def import_path(path):
-    """Import and return object representing dotted path.
+    '''Import and return object representing dotted path.
 
     Args:
         path (str): Dotted path to import.
@@ -45,7 +45,7 @@ def import_path(path):
 
     >>> from package import module
 
-    """
+    '''
     parts = path.split('.')
     prefix = '.'.join(parts[:-1])
     suffix = '.'.join(parts[-1:])
@@ -124,7 +124,16 @@ class WSJSONPkt(object):
 
 class HTTPRequestHandler(web.RequestHandler):
     
-    pass
+    def handler(self, *args, **kwargs):
+        return self.func(*args, **kwargs)
+    
+    head = handler
+    get = handler
+    post = handler
+    options = handler
+    put = handler
+    patch = handler
+    delete = handler
 
 class WebSocketHandler(SockJSConnection):
     'Implements tornado web socket handler and delegate packets to handlers'
@@ -212,16 +221,7 @@ class Application(object):
     
     @staticmethod
     def new_http_request_handler(func):
-        Handler = type("WebRequestHandler", (HTTPRequestHandler,), {
-            'get': func,
-            'post': func,
-            'head': func,
-            'options': func,
-            'put': func,
-            'patch': func,
-            'delete': func,
-        })
-        return Handler
+        return type("WebRequestHandler", (HTTPRequestHandler,), {'func': func,})
     
     def _add_http_route(self, path):
         def decorator(func):
