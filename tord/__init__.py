@@ -1,6 +1,6 @@
 from .tord import Application
 
-VERSION = (0, 2, 2)
+VERSION = (0, 2, 3)
 __version__ = '.'.join(map(str, VERSION[0:3])) + ''.join(VERSION[3:])
 __description__ = 'Asynchronous websocket + pubsub based web framework'
 __author__ = 'Abhinav Singh'

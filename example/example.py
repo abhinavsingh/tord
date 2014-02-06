@@ -49,11 +49,15 @@ def user_profile(request, user_id):
 def user_photo(request, user_id):
     request.write('%s photo' % user_id)
 
-@app.route(r'.*') # catch all
+@app.route(r'.*$') # catch all
 def index(request):
-    request.write(
-        app.template.load('index.html').generate(title='Tord Example', static_prefix='/static')
-    )
+    template = app.template.load('index.html')
+    ctx = {
+        'title':'Tord Example', 
+        'static_prefix':'/static',
+        'tord_js_path':'/static/tord/tord.js',
+    }
+    request.write(template.generate(**ctx))
 
 ##
 ## REST API over Websocket

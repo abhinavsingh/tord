@@ -7,10 +7,8 @@ import task
 import logging
 import async_pubsub
 
-from tornado import ioloop
-from tornado import web
-from tornado import websocket
-from tornado import template
+from tornado import ioloop, web, template
+from sockjs.tornado import SockJSConnection, SockJSRouter
 
 logger = logging.getLogger(__name__)
 
@@ -38,19 +36,6 @@ class WSJSONPkt(object):
         self.ws = ws
         self.raw = raw
         self.channel_id = self.ws.channel_id
-    
-    def load(self):
-        try:
-            self.msg = json.loads(self.raw)
-        except ValueError, e:
-            raise WSBadPkt(str(e))
-    
-    def validate(self):
-        if 'path' not in self:
-            raise WSPktPathAttrMissing()
-        
-        if 'id' not in self:
-            raise WSPktIDAttrMissing()
 
     def __getitem__(self, key):
         return self.msg[key]
@@ -64,16 +49,12 @@ class WSJSONPkt(object):
     def __contains__(self, key):
         return key in self.msg
     
-    def reply(self, response, final=True):
+    def reply(self, data, final=True):
         global settings
         
-        out = {
-            'meta': {
-                'id': self.msg['id'],
-                'final': final,
-            }, 
-            'response': response,
-        }
+        out = dict(_id_=self.msg['_id_'], _data_=data)
+        if not final:
+            out['_final_'] = final
         
         if self.ws:
             self.ws.send(out)
@@ -86,10 +67,23 @@ class WSJSONPkt(object):
         t.start()
         return t
     
+    def load(self):
+        try:
+            self.msg = json.loads(self.raw)
+        except ValueError, e:
+            raise WSBadPkt(str(e))
+    
+    def validate(self):
+        if '_path_' not in self:
+            raise WSPktPathAttrMissing()
+        
+        if '_id_' not in self:
+            raise WSPktIDAttrMissing()
+    
     def apply_handler(self):
         global settings
         
-        path = self['path']
+        path = self['_path_']
         if path not in settings.routes['ws']:
             raise WSRouteNotFound()
         
@@ -99,10 +93,10 @@ class WSJSONPkt(object):
         except Exception, e:
             raise WSRouteException(str(e))
 
-class WebSocketHandler(websocket.WebSocketHandler):
+class WebSocketHandler(SockJSConnection):
     'Implements tornado web socket handler and delegate packets to handlers'
     
-    def open(self):
+    def on_open(self, info):
         global settings
         self.channel_id = uuid.uuid4().hex
         
@@ -157,9 +151,9 @@ class WebSocketHandler(websocket.WebSocketHandler):
             else:
                 logging.debug('Rcvd msg %s on unhandled channel id %s' % (args[1], args[0]))
     
-    def send(self, msg, binary=False):
+    def send(self, msg):
         logging.debug('websocket send: %s' % msg)
-        self.write_message(msg, binary)
+        super(WebSocketHandler, self).send(msg)
 
 class Application(object):
     'Handles initial bootstrapping of the application.'
@@ -167,6 +161,8 @@ class Application(object):
     def __init__(self, **options):
         global settings
         settings.options = options
+        self.tord_static_path = os.path.join(os.path.join(os.path.dirname(os.path.realpath(__file__)), 'static'), 'tord')
+        self.template = template.Loader(os.path.abspath(self.templates_dir))
     
     def add_route(self, path, func, options=None, prepend=False):
         global settings
@@ -244,10 +240,12 @@ class Application(object):
         settings.pubsub['opts'] = self.pubsub_opts
         
         self.add_route('%s/(.*)' % self.static_path, web.StaticFileHandler, {'path': os.path.abspath(self.static_dir)}, True)
-        self.add_route(self.ws_path, WebSocketHandler, None, True)
-        self.template = template.Loader(os.path.abspath(self.templates_dir))
+        self.add_route('%s/tord/(.*)' % self.static_path, web.StaticFileHandler, {'path': self.tord_static_path}, True)
         
-        self.app = web.Application(settings.routes['http'], debug=self.debug, cache_compiled_templates=False)
+        self.app = web.Application(
+            SockJSRouter(WebSocketHandler, self.ws_path).urls + settings.routes['http'], 
+            debug=self.debug
+        )
         self.app.listen(self.port)
         print 'Listening on port %s ...' % self.port
         
