@@ -1,9 +1,11 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 import os
+import re
 import json
 import uuid
 import task
+import random
 import logging
 import async_pubsub
 
@@ -64,7 +66,7 @@ class WSJSONPkt(object):
     def __init__(self, ws, raw):
         self.ws = ws
         self.raw = raw
-        self.channel_id = self.ws.channel_id
+        self.sid = self.ws.sid
 
     def __getitem__(self, key):
         return self.msg[key]
@@ -79,8 +81,6 @@ class WSJSONPkt(object):
         return key in self.msg
     
     def reply(self, data, final=True):
-        global settings
-        
         out = dict(_id_=self.msg['_id_'], _data_=data)
         if not final:
             out['_final_'] = final
@@ -88,7 +88,7 @@ class WSJSONPkt(object):
         if self.ws:
             self.ws.send(out)
         else:
-            settings.pubsub['klass'].publish(self.channel_id, json.dumps(out))
+            settings.pubsub['klass'].publish(self.sid, json.dumps(out))
     
     def reply_async(self, handler):
         self.ws = None
@@ -110,8 +110,6 @@ class WSJSONPkt(object):
             raise WSPktIDAttrMissing()
     
     def apply_handler(self):
-        global settings
-        
         path = self['_path_']
         if path not in settings.routes['ws']:
             raise WSRouteNotFound()
@@ -135,17 +133,53 @@ class HTTPRequestHandler(web.RequestHandler):
     patch = handler
     delete = handler
 
+class WSInvalidInfoPath(Exception):
+    
+    def __init__(self, message, path):
+        Exception.__init__(self, message)
+        self.path = path
+class WSSessionInitializationFailed(Exception): Exception
+
 class WebSocketHandler(SockJSConnection):
     'Implements tornado web socket handler and delegate packets to handlers'
     
     def on_open(self, info):
-        global settings
-        self.channel_id = uuid.uuid4().hex
+        self.info = info
+        self.parse_sid_tid_from_path()
         
+        # TODO: session initializer klass can be defined via app settings
+        params = self.start_anonymous_session(self)
+        
+        if len(params) == 3:
+            self.sid, self.uid, self.ses = params
+            self.connect_pubsub()
+        else:
+            raise WSSessionInitializationFailed('session initializer returned params tuple/list of length %s, expected 3' % len(params))
+    
+    def connect_pubsub(self):
         settings.pubsub['opts']['callback'] = self.pubsub_callback
         self.pubsub = settings.pubsub['klass'](**settings.pubsub['opts'])
         self.pubsub.connect()
         self.connected = False
+    
+    @staticmethod
+    def start_anonymous_session(ws):
+        sid = uuid.uuid4().hex
+        user = 'guest.%s' % random.randint(111, 9999)
+        session = dict()
+        return sid, user, session
+    
+    def parse_sid_tid_from_path(self):
+        parts = self.info.path.split('/')[2].split('_')
+        if len(parts) > 2:
+            raise WSInvalidInfoPath("invalid info.path %s, dropping connection" % self.info.path)
+        
+        if len(parts) == 1:
+            self.sid = None
+            self.tid = parts[0]
+        elif len(parts) == 2:
+            self.sid = parts[0]
+            self.tid = parts[1]
     
     def on_message(self, raw):
         try:
@@ -178,16 +212,18 @@ class WebSocketHandler(SockJSConnection):
         if evtype == async_pubsub.constants.CALLBACK_TYPE_CONNECTED:
             logger.info('Connected to pubsub')
             self.connected = True
-            self.pubsub.subscribe(self.channel_id)
+            self.pubsub.subscribe(self.sid)
         elif evtype == async_pubsub.constants.CALLBACK_TYPE_DISCONNECTED:
             logger.info('Disconnected from pubsub')
             self.connected = False
         elif evtype == async_pubsub.constants.CALLBACK_TYPE_SUBSCRIBED:
             logger.info('Subscribed to channel %s' % args[0])
+            if args[0] == self.sid:
+                self.send({'sid':self.sid, 'tid':self.tid, 'uid':self.uid, '_path_':'on_channel_open'})
         elif evtype == async_pubsub.constants.CALLBACK_TYPE_UNSUBSCRIBED:
             logger.info('Unsubscribed to channel %s' % args[0])
         elif evtype == async_pubsub.constants.CALLBACK_TYPE_MESSAGE:
-            if args[0] == self.channel_id:
+            if args[0] == self.sid:
                 logging.debug('pubsub channel: %s rcvd: %s' % (args[0], args[1]))
                 self.send(args[1])
             else:
@@ -203,20 +239,17 @@ class Application(object):
     'Handles initial bootstrapping of the application.'
     
     def __init__(self, **options):
-        global settings
         settings.options = options
         self.tord_static_path = os.path.join(os.path.join(os.path.dirname(os.path.realpath(__file__)), 'static'), 'tord')
         self.template = template.Loader(os.path.abspath(self.templates_dir))
     
     def add_http_route(self, path, func, options=None, prepend=False):
-        global settings
         if prepend:
             settings.routes['http'] = [(path, func, options),] + settings.routes['http']
         else:
             settings.routes['http'].append((path, func, options),)
     
     def add_ws_route(self, path, func):
-        global settings
         settings.routes['ws'][path] = func
     
     @staticmethod
@@ -231,7 +264,6 @@ class Application(object):
         return decorator
     
     def _add_ws_route(self, path):
-        global settings
         def decorator(func):
             self.add_ws_route(path, func)
         return decorator
@@ -256,36 +288,29 @@ class Application(object):
     
     @property
     def port(self):
-        global settings
         return settings.options['port'] if 'port' in settings.options else 8888
     
     @property
     def ws_path(self):
-        global settings
         return settings.options['ws_path'] if 'ws_path' in settings.options else '/ws'
     
     @property
     def static_dir(self):
-        global settings
         return settings.options['static_dir']
     
     @property
     def static_path(self):
-        global settings
         return settings.options['static_path'] if 'static_path' in settings.options else '/static'
     
     @property
     def templates_dir(self):
-        global settings
         return settings.options['templates_dir']
     
     @property
     def debug(self):
-        global settings
         return settings.options['debug'] if 'debug' in settings.options else False
     
     def run(self):
-        global settings
         settings.pubsub['klass'] = import_path('async_pubsub.%s_pubsub.%sPubSub' % (self.pubsub_klass.lower(), self.pubsub_klass))
         settings.pubsub['opts'] = self.pubsub_opts
         

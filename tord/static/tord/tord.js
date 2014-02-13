@@ -40,6 +40,9 @@ Tord.Channel = function(url, sid, tid) {
 	this.max_retry = 4;
 	this.retry = 0;
 	
+	// opened i.e. we have received on_channel_open pkt
+	this.opened = false;
+	
 	// outgoing message queue and auto-increment id
 	this.id = Math.floor(Math.random() * 4294967295);
 	this.q = [];
@@ -143,6 +146,12 @@ Tord.Channel.prototype = {
 		this.sid = msg['sid'];
 		this.tid = msg['tid'];
 		this.uid = msg['uid'];
+		this.log('channel opened for sid ' + this.sid);
+
+		// flush any pending queue of messages
+		this.opened = true;
+		while(this.q.length > 0) 
+			this._request(this.q.shift());
 	},
 	
 	// @private API that establish connection with tord service
@@ -165,12 +174,7 @@ Tord.Channel.prototype = {
 		this.connecting = false;
 		this.connected = true;
 		this.retry = 0;
-		
 		this.log("tord connected");
-		
-		// flush any pending queue of messages
-		while(this.q.length > 0) 
-			this._request(this.q.shift());
 		
 		// notify registered plugins about successful connection
 		for(var k in Tord.plugins) {
@@ -188,6 +192,7 @@ Tord.Channel.prototype = {
 		// setup connection state variable
 		this.connecting = false;
 		this.connected = false;
+		this.opened = false;
 
 		this.log("connection closed (" + e.code + ")");
 		
@@ -243,6 +248,7 @@ Tord.Channel.prototype = {
 			// if response hasn't been delegated to any callback
 			// try to delegate response to a handler that handles
 			// response of this path
+			this.log(handled);
 			if(!handled && msg['_path_'] in this.handlers) {
 				this.handlers[msg['_path_']](msg);
 			}
@@ -258,8 +264,9 @@ Tord.Channel.prototype = {
 	// otherwise it is queued and flushed when we reconnect
 	// NOTE: outgoing objects must have a mandatory path and id attribute
 	_request: function(obj) {
+		console.log(this.opened);
 		if(typeof obj == 'object' && obj._path_ && obj._id_) {
-			if(this.connected) {
+			if(this.opened) {
 				this.sock.send(JSON.stringify(obj));
 			}
 			else {
