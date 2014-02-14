@@ -1,8 +1,5 @@
 import os
-import logging
 from tord import Application
-
-logging.basicConfig(level=logging.DEBUG)
 
 ##
 ## path to your web files

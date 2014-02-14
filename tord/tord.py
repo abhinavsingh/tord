@@ -254,7 +254,7 @@ class Application(object):
             settings.routes['http'].append((path, func, options),)
     
     def _add_ws_route(self, path, func):
-        route = re.compile(path)
+        route = re.compile(path, re.UNICODE)
         assert len(route.groupindex) == 0 or len(route.groupindex) == route.groups
         settings.routes['ws'].append((route, func),)
     
