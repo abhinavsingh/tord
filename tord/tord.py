@@ -23,6 +23,7 @@ settings.routes['ws'] = list()
 settings.pubsub = dict()
 settings.pubsub['klass'] = None
 settings.pubsub['opts'] = dict()
+settings.options = dict()
 
 # custom exceptions
 class WSBadPkt(Exception): pass
@@ -142,6 +143,7 @@ class WSInvalidInfoPath(Exception):
     def __init__(self, message, path):
         Exception.__init__(self, message)
         self.path = path
+
 class WSSessionInitializationFailed(Exception): Exception
 
 class WebSocketHandler(SockJSConnection):
@@ -242,10 +244,17 @@ class WebSocketHandler(SockJSConnection):
 class Application(object):
     'Handles initial bootstrapping of the application.'
     
-    def __init__(self, **options):
-        settings.options = options
-        self.tord_static_path = os.path.join(os.path.join(os.path.dirname(os.path.realpath(__file__)), 'static'), 'tord')
-        self.template = template.Loader(os.path.abspath(self.templates_dir))
+    def __init__(self, port=8888, debug=False):
+        settings.options['port'] = port
+        settings.options['debug'] = debug
+        
+        settings.options['http'] = dict()
+        settings.options['ws'] = dict()
+        settings.options['pubsub'] = dict()
+    
+    def configure(self, what, **kwargs):
+        for k in kwargs:
+            settings.options[what][k] = kwargs[k]
     
     def _add_http_route(self, path, func, options=None, prepend=False):
         if prepend:
@@ -281,42 +290,42 @@ class Application(object):
         '''
         return self.add_ws_route(path) if transport == 'ws' else self.add_http_route(path)
     
-    def pubsub(self, klass, opts):
-        '''Configure pubsub module for this application.
-        
-        `klass` must be one of `async_pubsub` implementation
-        or must implement it's base API.
-        
-        `opts` is a dictionary passed as kwargs to the pubsub constructor
-        '''
-        self.pubsub_klass = klass
-        self.pubsub_opts = opts
-    
     @property
     def port(self):
         return settings.options['port'] if 'port' in settings.options else 8888
     
     @property
-    def ws_path(self):
-        return settings.options['ws_path'] if 'ws_path' in settings.options else '/ws'
-    
-    @property
-    def static_dir(self):
-        return settings.options['static_dir']
-    
-    @property
-    def static_path(self):
-        return settings.options['static_path'] if 'static_path' in settings.options else '/static'
-    
-    @property
-    def templates_dir(self):
-        return settings.options['templates_dir']
-    
-    @property
     def debug(self):
         return settings.options['debug'] if 'debug' in settings.options else False
     
+    @property
+    def ws_path(self):
+        return settings.options['ws']['path'] if 'path' in settings.options['ws'] else '/ws'
+    
+    @property
+    def static_dir(self):
+        return settings.options['http']['static_dir']
+    
+    @property
+    def static_path(self):
+        return settings.options['http']['static_path'] if 'static_path' in settings.options['http'] else '/static'
+    
+    @property
+    def templates_dir(self):
+        return settings.options['http']['templates_dir']
+    
+    @property
+    def pubsub_klass(self):
+        return settings.options['pubsub']['klass']
+    
+    @property
+    def pubsub_opts(self):
+        return settings.options['pubsub']['opts']
+    
     def run(self):
+        self.tord_static_path = os.path.join(os.path.join(os.path.dirname(os.path.realpath(__file__)), 'static'), 'tord')
+        self.template = template.Loader(os.path.abspath(self.templates_dir))
+        
         settings.pubsub['klass'] = import_path('async_pubsub.%s_pubsub.%sPubSub' % (self.pubsub_klass.lower(), self.pubsub_klass))
         settings.pubsub['opts'] = self.pubsub_opts
         

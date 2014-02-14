@@ -14,19 +14,34 @@ templates_dir = os.path.join(os.path.dirname(os.path.realpath(__file__)), 'templ
 
 app = Application(
     #port = 8888,                         # (default: 8888) web server port
-    #ws_path = '/ws',                     # (default: /ws) websocket path
-    static_dir = static_dir,              # Static content (html, css, js) path
-    #static_path = '/static',             # (default: /static) static http prefix
-    templates_dir = templates_dir,        # See Loader class under `http://www.tornadoweb.org/en/stable/template.html`
     debug = True,                         # (default: False) enable debugging
 )
 
 ##
-## add pubsub support to the application
+## configure http
+##
+
+app.configure('http',
+    static_dir = static_dir,              # Static content (html, css, js) path
+    #static_path = '/static',             # (default: /static) static http prefix
+    templates_dir = templates_dir,        # See Loader class under `http://www.tornadoweb.org/en/stable/template.html`
+    
+)
+
+##
+## configure websockets
+##
+
+app.configure('ws', 
+    #path = '/ws',                        # (default: /ws) websocket path
+)
+
+##
+## configure pubsub support to the application
 ## See `https://github.com/abhinavsingh/async_pubsub` for more detail on pubsub support.
 ##
 
-app.pubsub(
+app.configure('pubsub',
     klass = 'Redis', # or 'ZMQ'.
     opts = { # RedisPubSub expects redis server running at below configuration
         'host': '127.0.0.1',
