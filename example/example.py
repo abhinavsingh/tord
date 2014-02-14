@@ -46,7 +46,7 @@ def user_profile(request, user_id):
     request.write('%s profile' % user_id)
 
 @app.route(r'/api/user/(\w+)/photo/')
-def user_photo(request, user_id):
+def user_photo(request, user_id, async, partial, async2, partial2):
     request.write('%s photo' % user_id)
 
 @app.route(r'.*$') # catch all
@@ -63,20 +63,20 @@ def index(request):
 ## REST API over Websocket
 ##
 
-@app.route(r'/test/reply/', transport='ws')
-def test_reply(pkt):
+@app.route(r'/api/user/(\w+)/$', transport='ws')
+def test_reply(pkt, user_id):
     # reply synchronously
-    pkt.reply({'test':'reply'})
+    pkt.reply({'user_id':user_id})
 
-@app.route(r'/test/reply/async/', transport='ws')
-def test_reply_async(pkt):
+@app.route(r'/api/user/(\w+)/photo/$', transport='ws')
+def test_reply_async(pkt, user_id):
     # reply asynchronously
-    _task = pkt.reply_async(test_reply_async_handler)
+    _task = pkt.reply_async(test_reply_async_handler, user_id)
 
-@app.route(r'/test/reply/async/partial/', transport='ws')
-def test_reply_async_partially(pkt):
+@app.route(r'/api/user/(?P<user_id>\w+)/(?P<stream>\w+)/$', transport='ws')
+def test_reply_async_partially(pkt, user_id, stream):
     # reply asynchronously and send data in chunks
-    _task = pkt.reply_async(test_reply_async_partial_handler)
+    _task = pkt.reply_async(test_reply_async_partial_handler, user_id, stream)
 
 ##
 ## WebSocket async reply handlers.
@@ -88,19 +88,22 @@ def test_reply_async_partially(pkt):
 
 def test_reply_async_handler(t):
     pkt = t.args[0]
-    pkt.reply({'test':'reply', 'async':True})
+    user_id = t.args[1]
+    pkt.reply({'user_id':user_id})
     return True
 
 def test_reply_async_partial_handler(t):
     import time
     pkt = t.args[0]
+    user_id = t.args[1]
+    stream = t.args[2]
     
     i = 0
     while True:
         if i == 5:
             break
         i += 1
-        pkt.reply({'test':'reply', 'async':True, 'i':i}, final=bool(i == 5))
+        pkt.reply({'user_id':user_id, 'stream':stream, 'i':i}, final=bool(i == 5))
         time.sleep(1)
     
     return True

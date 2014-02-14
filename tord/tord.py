@@ -19,7 +19,7 @@ class Settings(): pass
 settings = Settings()
 settings.routes = dict()
 settings.routes['http'] = list()
-settings.routes['ws'] = dict()
+settings.routes['ws'] = list()
 settings.pubsub = dict()
 settings.pubsub['klass'] = None
 settings.pubsub['opts'] = dict()
@@ -88,11 +88,12 @@ class WSJSONPkt(object):
         if self.ws:
             self.ws.send(out)
         else:
+            out['_async_'] = True
             settings.pubsub['klass'].publish(self.sid, json.dumps(out))
     
-    def reply_async(self, handler):
+    def reply_async(self, handler, *args, **kwargs):
         self.ws = None
-        t = task.Task(handler, self)
+        t = task.Task(handler, self, *args, **kwargs)
         t.start()
         return t
     
@@ -111,12 +112,15 @@ class WSJSONPkt(object):
     
     def apply_handler(self):
         path = self['_path_']
-        if path not in settings.routes['ws']:
+        for (route, func) in settings.routes['ws']:
+            match = route.match(path)
+            if match:
+                break
+        else:
             raise WSRouteNotFound()
         
-        func = settings.routes['ws'][path]
         try:
-            func(self)
+            func(self, *match.groups())
         except Exception, e:
             raise WSRouteException(str(e))
 
@@ -243,29 +247,31 @@ class Application(object):
         self.tord_static_path = os.path.join(os.path.join(os.path.dirname(os.path.realpath(__file__)), 'static'), 'tord')
         self.template = template.Loader(os.path.abspath(self.templates_dir))
     
-    def add_http_route(self, path, func, options=None, prepend=False):
+    def _add_http_route(self, path, func, options=None, prepend=False):
         if prepend:
             settings.routes['http'] = [(path, func, options),] + settings.routes['http']
         else:
             settings.routes['http'].append((path, func, options),)
     
-    def add_ws_route(self, path, func):
-        settings.routes['ws'][path] = func
+    def _add_ws_route(self, path, func):
+        route = re.compile(path)
+        assert len(route.groupindex) == 0 or len(route.groupindex) == route.groups
+        settings.routes['ws'].append((route, func),)
     
     @staticmethod
     def new_http_request_handler(func):
         return type("WebRequestHandler", (HTTPRequestHandler,), {'func': func,})
     
-    def _add_http_route(self, path):
+    def add_http_route(self, path):
         def decorator(func):
             handler = self.new_http_request_handler(func)
-            self.add_http_route(path, handler)
+            self._add_http_route(path, handler)
             return func
         return decorator
     
-    def _add_ws_route(self, path):
+    def add_ws_route(self, path):
         def decorator(func):
-            self.add_ws_route(path, func)
+            self._add_ws_route(path, func)
         return decorator
     
     def route(self, path, transport='http'):
@@ -273,7 +279,7 @@ class Application(object):
         
         Both `http` and `ws` routes can be registered using this method.
         '''
-        return self._add_ws_route(path) if transport == 'ws' else self._add_http_route(path)
+        return self.add_ws_route(path) if transport == 'ws' else self.add_http_route(path)
     
     def pubsub(self, klass, opts):
         '''Configure pubsub module for this application.
@@ -314,8 +320,8 @@ class Application(object):
         settings.pubsub['klass'] = import_path('async_pubsub.%s_pubsub.%sPubSub' % (self.pubsub_klass.lower(), self.pubsub_klass))
         settings.pubsub['opts'] = self.pubsub_opts
         
-        self.add_http_route('%s/(.*)' % self.static_path, web.StaticFileHandler, {'path': os.path.abspath(self.static_dir)}, True)
-        self.add_http_route('%s/tord/(.*)' % self.static_path, web.StaticFileHandler, {'path': self.tord_static_path}, True)
+        self._add_http_route('%s/(.*)' % self.static_path, web.StaticFileHandler, {'path': os.path.abspath(self.static_dir)}, True)
+        self._add_http_route('%s/tord/(.*)' % self.static_path, web.StaticFileHandler, {'path': self.tord_static_path}, True)
         
         self.app = web.Application(
             SockJSRouter(WebSocketHandler, self.ws_path).urls + settings.routes['http'], 
