@@ -1,5 +1,5 @@
 import os
-from tord import Application
+from tord.tord import Application
 
 ##
 ## path to your web files

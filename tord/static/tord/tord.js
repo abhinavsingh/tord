@@ -62,8 +62,8 @@ Tord.Channel = function(url, sid, tid) {
 			var F = function() {};
 			F.prototype = proto;
 			this[k] = new F();
-			if(this[k].init) {
-				this[k].init(this);
+			if(this[k].initialize) {
+				this[k].initialize(this);
 			}
 		}
 	}
@@ -104,16 +104,6 @@ Tord.Channel.prototype = {
 		this.connected = false;
 		this.retry = 0;
 		this.q = [];
-		
-		// call disconnected method of registered plugins
-		for(var k in Tord.plugins) {
-			if(Tord.plugins.hasOwnProperty(k)) {
-				var handler = this[k];
-				if(handler.disconnected) {
-					handler.disconnected();
-				}
-			}
-		}
 	},
 	
 	// @public API to immediate restart aborting any timer
@@ -152,6 +142,15 @@ Tord.Channel.prototype = {
 		this.opened = true;
 		while(this.q.length > 0) 
 			this._request(this.q.shift());
+		
+		for(var k in Tord.plugins) {
+			if(Tord.plugins.hasOwnProperty(k)) {
+				var handler = this[k];
+				if(handler.connected) {
+					handler.connected();
+				}
+			}
+		}
 	},
 	
 	// @private API that establish connection with tord service
@@ -180,8 +179,8 @@ Tord.Channel.prototype = {
 		for(var k in Tord.plugins) {
 			if(Tord.plugins.hasOwnProperty(k)) {
 				var handler = this[k];
-				if(handler._on_open) {
-					handler._on_open();
+				if(handler.opened) {
+					handler.opened();
 				}
 			}
 		}
@@ -204,8 +203,8 @@ Tord.Channel.prototype = {
 		for(var k in Tord.plugins) {
 			if(Tord.plugins.hasOwnProperty(k)) {
 				var handler = this[k];
-				if(handler._on_close) {
-					handler._on_close();
+				if(handler.closed) {
+					handler.closed();
 				}
 			}
 		}
@@ -248,7 +247,6 @@ Tord.Channel.prototype = {
 			// if response hasn't been delegated to any callback
 			// try to delegate response to a handler that handles
 			// response of this path
-			this.log(handled);
 			if(!handled && msg['_path_'] in this.handlers) {
 				this.handlers[msg['_path_']](msg);
 			}
@@ -264,7 +262,6 @@ Tord.Channel.prototype = {
 	// otherwise it is queued and flushed when we reconnect
 	// NOTE: outgoing objects must have a mandatory path and id attribute
 	_request: function(obj) {
-		console.log(this.opened);
 		if(typeof obj == 'object' && obj._path_ && obj._id_) {
 			if(this.opened) {
 				this.sock.send(JSON.stringify(obj));

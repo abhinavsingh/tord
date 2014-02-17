@@ -32,5 +32,6 @@ setup(
     license             = tord.__license__,
     packages            = find_packages(),
     install_requires    = install_requires,
-    classifiers         = classifiers
+    classifiers         = classifiers,
+    include_package_data= True
 )

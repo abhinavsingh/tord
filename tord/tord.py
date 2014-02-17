@@ -82,7 +82,7 @@ class WSJSONPkt(object):
         return key in self.msg
     
     def reply(self, data, final=True):
-        out = dict(_id_=self.msg['_id_'], _data_=data)
+        out = dict(_id_=self.msg['_id_'], _path_=self.msg['_path_'], _data_=data)
         if not final:
             out['_final_'] = final
         
