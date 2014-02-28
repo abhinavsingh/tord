@@ -17,6 +17,7 @@ $(function() {
 	
 	var id3 = tord.request('/api/user/1/streaming/', {'a':'√'}, function(msg) {
 		console.assert(msg._async_ == true);
+		console.assert(msg._id_ == id3);
 		if(msg._data_.i < 5)
 			console.assert(msg._final_ == false);
 		console.assert(msg._data_.stream == 'streaming');
