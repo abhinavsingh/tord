@@ -1,13 +1,10 @@
-<!DOCTYPE html>
-<html>
-    <head>
-        <title>{{ title }}</title>
-        <link rel="stylesheet" href="{{ static_prefix }}/main.css" type="text/css"></link>
-        <script type="text/javascript" src="{{ static_prefix }}/main.js"></script>
-    </head>
-    <body>
-        <div class="container">
-            <h2>Tord Examples</h2>
-        </div>
-    </body>
-</html>
+{% extends "base.html" %}
+
+{% block title %}{{ title }}{% end %}
+
+{% block content %}
+<div class="container">
+    <h2>{{ title }}</h2>
+</div>
+<script type="text/javascript" src="{{ static_prefix }}/main.js"></script>
+{% end %}

@@ -1,1 +1,4 @@
-console.log('Tord Example');
+$(function() {
+	window.tord = new Tord.Channel();
+	tord.connect();
+});
