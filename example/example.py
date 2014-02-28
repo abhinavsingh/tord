@@ -64,11 +64,7 @@ def user_photo(request, user_id, async, partial, async2, partial2):
 @app.route(r'.*$') # catch all
 def index(request):
     template = app.template.load('index.html')
-    ctx = {
-        'title':'Tord Example', 
-        'static_prefix':'/static',
-        'tord_js_path':'/static/tord/tord.js',
-    }
+    ctx = {'title':'Tord Example', 'static_prefix':'/static',}
     request.write(template.generate(**ctx))
 
 ##
