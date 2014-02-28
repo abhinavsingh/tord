@@ -37,7 +37,7 @@ app.configure('ws',
 )
 
 ##
-## configure pubsub support to the application
+## configure pubsub support for the application
 ## See `https://github.com/abhinavsingh/async_pubsub` for more detail on pubsub support.
 ##
 
@@ -95,7 +95,7 @@ def test_reply_async_partially(pkt, user_id, stream):
 ## These methods reply to the websocket request asynchronously.
 ## Configured pubsub server is used to send data asynchronously.
 ## See `https://github.com/abhinavsingh/task.py` for methods available on variable `_task` above and `t` below.
-## `Task` can also be replaced by `celery`, `rq` etc
+## `Task` can also be replaced or used in combination with frameworks like `celery`, `rq` etc
 ##
 
 def test_reply_async_handler(t):
