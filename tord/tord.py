@@ -67,7 +67,7 @@ class WSJSONPkt(object):
     def __init__(self, ws, raw):
         self.ws = ws
         self.raw = raw
-        self.sid = self.ws.sid
+        self.channel_id = self.ws.channel_id
 
     def __getitem__(self, key):
         return self.msg[key]
@@ -90,7 +90,7 @@ class WSJSONPkt(object):
             self.ws.send(out)
         else:
             out['_async_'] = True
-            settings.pubsub['klass'].publish(self.sid, json.dumps(out))
+            settings.pubsub['klass'].publish(self.channel_id, json.dumps(out))
     
     def reply_async(self, handler, *args, **kwargs):
         self.ws = None
@@ -151,9 +151,12 @@ class WebSocketHandler(SockJSConnection):
     
     def on_open(self, info):
         self.info = info
+        logger.info(info)
+        
+        # parse session id and tab id passed from client side
         self.parse_sid_tid_from_path()
         
-        # TODO: session initializer klass can be defined via app settings
+        # TODO: session initializer klass must be overridden using app settings
         params = self.start_anonymous_session(self)
         
         if len(params) == 3:
@@ -161,6 +164,10 @@ class WebSocketHandler(SockJSConnection):
             self.connect_pubsub()
         else:
             raise WSSessionInitializationFailed('session initializer returned params tuple/list of length %s, expected 3' % len(params))
+    
+    @property
+    def channel_id(self):
+        return 'sid:%s:tid:%s' % (self.sid, self.tid)
     
     def connect_pubsub(self):
         settings.pubsub['opts']['callback'] = self.pubsub_callback
@@ -218,25 +225,29 @@ class WebSocketHandler(SockJSConnection):
         if evtype == async_pubsub.constants.CALLBACK_TYPE_CONNECTED:
             logger.info('Connected to pubsub')
             self.connected = True
-            self.pubsub.subscribe(self.sid)
+            self.pubsub.subscribe(self.channel_id)
+        
         elif evtype == async_pubsub.constants.CALLBACK_TYPE_DISCONNECTED:
             logger.info('Disconnected from pubsub')
             self.connected = False
+        
         elif evtype == async_pubsub.constants.CALLBACK_TYPE_SUBSCRIBED:
             logger.info('Subscribed to channel %s' % args[0])
-            if args[0] == self.sid:
+            if args[0] == self.channel_id:
                 self.send({'sid':self.sid, 'tid':self.tid, 'uid':self.uid, '_path_':'on_channel_open'})
+        
         elif evtype == async_pubsub.constants.CALLBACK_TYPE_UNSUBSCRIBED:
             logger.info('Unsubscribed to channel %s' % args[0])
+        
         elif evtype == async_pubsub.constants.CALLBACK_TYPE_MESSAGE:
-            if args[0] == self.sid:
-                logging.debug('pubsub channel: %s rcvd: %s' % (args[0], args[1]))
+            if args[0] == self.channel_id:
+                logger.debug('pubsub channel: %s rcvd: %s' % (args[0], args[1]))
                 self.send(args[1])
             else:
-                logging.debug('Rcvd msg %s on unhandled channel id %s' % (args[1], args[0]))
+                logger.debug('Rcvd msg %s on unhandled channel id %s' % (args[1], args[0]))
     
     def send(self, msg):
-        logging.debug('websocket send: %s' % msg)
+        logger.debug('websocket send: %s' % msg)
         if type(msg) not in (str, unicode):
             msg = json.dumps(msg)
         super(WebSocketHandler, self).send(msg)
