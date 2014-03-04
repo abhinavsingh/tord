@@ -1,3 +1,6 @@
+Tord
+====
+
 Asynchronous Websocket + Pubsub based web framework built over Tornado, Redis, ZMQ, SockJS
 
 Goals:
@@ -8,5 +11,6 @@ Goals:
 - Template support
 - Static serving support
 - PubSub support using Redis or ZMQ
+- Asynchronous + Tornado event loop
 
 See [example](https://github.com/abhinavsingh/tord/tree/master/example) for usage and documentation.
