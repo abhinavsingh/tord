@@ -151,13 +151,8 @@ class WebSocketHandler(SockJSConnection):
     
     def on_open(self, info):
         self.info = info
-        logger.info(info)
-        
-        # parse session id and tab id passed from client side
         self.parse_sid_tid_from_path()
-        
-        # TODO: session initializer klass must be overridden using app settings
-        params = self.start_anonymous_session(self)
+        params = self.session_initializer(self)
         
         if len(params) == 3:
             self.sid, self.uid, self.ses = params
@@ -166,8 +161,15 @@ class WebSocketHandler(SockJSConnection):
             raise WSSessionInitializationFailed('session initializer returned params tuple/list of length %s, expected 3' % len(params))
     
     @property
+    def session_initializer(self):
+        session_initializer = settings.options['ws']['session_initializer'] if 'session_initializer' in settings.options['ws'] else self.start_anonymous_session
+        if type(session_initializer) in (str, unicode):
+            session_initializer = import_path(session_initializer)
+        return session_initializer
+    
+    @property
     def channel_id(self):
-        return 'sid:%s:tid:%s' % (self.sid, self.tid)
+        return 'tord:sid:%s:tid:%s' % (self.sid, self.tid)
     
     def connect_pubsub(self):
         settings.pubsub['opts']['callback'] = self.pubsub_callback
@@ -178,9 +180,9 @@ class WebSocketHandler(SockJSConnection):
     @staticmethod
     def start_anonymous_session(ws):
         sid = uuid.uuid4().hex
-        user = 'guest.%s' % random.randint(111, 9999)
+        uid = 'guest.%s' % random.randint(111, 9999)
         session = dict()
-        return sid, user, session
+        return sid, uid, session
     
     def parse_sid_tid_from_path(self):
         parts = self.info.path.split('/')[2].split('_')
