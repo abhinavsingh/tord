@@ -1,9 +1,12 @@
-Asynchronous websocket + pubsub based web framework using tornado, redis, zmq, sockjs
+Asynchronous Websocket + Pubsub based web framework built over Tornado, Redis, ZMQ, SockJS
 
-Usage:
+Goals:
 ------
 
-$ python example/example.py
-$ open http://localhost:8888/
+- Micro Framework
+- REST API over HTTP and Websocket (over same TCP port)
+- Template support
+- Static serving support
+- PubSub support using Redis or ZMQ
 
-See javascript console and example/static/main.js for usage details.
+See [example](https://github.com/abhinavsingh/tord/tree/master/example) for usage and documentation.
