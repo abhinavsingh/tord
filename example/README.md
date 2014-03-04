@@ -7,6 +7,4 @@ $ python example/app.py
 $ open http://localhost:8888
 ```
 
-See [static/main.js](https://github.com/abhinavsingh/tord/blob/master/example/static/main.js) for usage detail.
-
-Open browser console and play with `tord` variable.
+Read [app.py](https://github.com/abhinavsingh/tord/blob/master/example/app.py) and [static/main.js](https://github.com/abhinavsingh/tord/blob/master/example/static/main.js) for usage detail.

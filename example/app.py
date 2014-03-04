@@ -27,7 +27,6 @@ app.configure('http',
     static_dir = static_dir,              # Static content (html, css, js) path
     #static_path = '/static',             # (default: /static) static http prefix
     templates_dir = templates_dir,        # See Loader class under `http://www.tornadoweb.org/en/stable/template.html`
-    
 )
 
 ##
@@ -40,7 +39,7 @@ def custom_session_initializer(ws):
 
 app.configure('ws', 
     #path = '/ws',                        # (default: /ws) websocket path
-    session_initializer = custom_session_initializer, # Can also be a dotted path
+    session_initializer = custom_session_initializer, # (default: tord.WebSocketHandler.start_anonymous_session) Can also be a dotted path
 )
 
 ##
@@ -48,7 +47,7 @@ app.configure('ws',
 ## See `https://github.com/abhinavsingh/async_pubsub` for more detail on pubsub support.
 ##
 
-# Expects redis server running at below configuration
+# Expects Redis server running at below configuration
 app.configure('pubsub',
     klass = 'Redis',
     opts = {
