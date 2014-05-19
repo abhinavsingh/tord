@@ -136,7 +136,6 @@ Tord.Channel.prototype = {
 		this.sid = msg['sid'];
 		this.tid = msg['tid'];
 		this.uid = msg['uid'];
-		this.log('channel opened for sid ' + this.sid);
 
 		// flush any pending queue of messages
 		this.opened = true;
@@ -173,7 +172,6 @@ Tord.Channel.prototype = {
 		this.connecting = false;
 		this.connected = true;
 		this.retry = 0;
-		this.log("tord connected");
 		
 		// notify registered plugins about successful connection
 		for(var k in Tord.plugins) {
@@ -192,8 +190,6 @@ Tord.Channel.prototype = {
 		this.connecting = false;
 		this.connected = false;
 		this.opened = false;
-
-		this.log("connection closed (" + e.code + ")");
 		
 		// cleanup and retry connection
 		this.sock = null;
@@ -204,7 +200,7 @@ Tord.Channel.prototype = {
 			if(Tord.plugins.hasOwnProperty(k)) {
 				var handler = this[k];
 				if(handler.closed) {
-					handler.closed();
+					handler.closed(e);
 				}
 			}
 		}
@@ -215,7 +211,7 @@ Tord.Channel.prototype = {
 		// setup connection state variables
 		this.connecting = false;
 		this.connected = false;
-		this.log("connection error (" + e.data + ")");
+		//this.log("connection error (" + e.data + ")");
 	},
 	
 	// @private API that is called when a message is received from tord service
@@ -252,7 +248,6 @@ Tord.Channel.prototype = {
 			}
 		}
 		catch(err) {
-			console.log(err.message);
 			this.log(err.message);
 		}
 	},
