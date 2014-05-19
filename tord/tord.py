@@ -11,8 +11,7 @@ import async_pubsub
 
 from tornado import ioloop, web, template
 from sockjs.tornado import SockJSConnection, SockJSRouter
-
-logger = logging.getLogger(__name__)
+logger = logging.getLogger('tord')
 
 # settings
 class Settings(): pass
@@ -102,7 +101,8 @@ class WSJSONPkt(object):
         try:
             self.msg = json.loads(self.raw)
         except ValueError, e:
-            raise WSBadPkt(str(e))
+            logger.exception(e)
+            raise WSBadPkt()
     
     def validate(self):
         if '_path_' not in self:
@@ -123,7 +123,8 @@ class WSJSONPkt(object):
         try:
             func(self, *match.groups())
         except Exception, e:
-            raise WSRouteException(str(e))
+            logger.exception(e)
+            raise WSRouteException()
 
 class HTTPRequestHandler(web.RequestHandler):
     
@@ -178,9 +179,9 @@ class WebSocketHandler(SockJSConnection):
         self.connected = False
     
     @staticmethod
-    def start_anonymous_session(ws):
+    def start_anonymous_session(_ws):
         sid = uuid.uuid4().hex
-        uid = 'guest.%s' % random.randint(111, 9999)
+        uid = 'guest%s' % random.randint(111, 9999)
         session = dict()
         return sid, uid, session
     
@@ -350,11 +351,11 @@ class Application(object):
             debug=self.debug
         )
         self.app.listen(self.port)
-        print 'Listening on port %s ...' % self.port
+        logger.info('Listening on port %s ...' % self.port)
         
         try:
             ioloop.IOLoop.instance().start()
         except KeyboardInterrupt:
             pass
         finally:
-            print 'Shutting down ...'
+            logger.info('Shutting down ...')
